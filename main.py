@@ -10,7 +10,7 @@ torch.set_float32_matmul_precision('high')
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a hierarchical PLRNN model.")
-    parser.add_argument('--data_path', type=str, default='./data/lorenz63/64sub/noisy', help='path to the directory contining the data')
+    parser.add_argument('--data_path', type=str, default='./data/lorenz63/3params64sub/noisy.npy', help='path to the data')
     parser.add_argument('--eval_data_path', type=str, default=None, help='path to the evaluation data if available')
     
     parser.add_argument('--obs_size', type=int, default=3, help='size of the observation space')
@@ -83,17 +83,21 @@ def get_device(args):
     print(f'Using device: {args.device}')
     return args
 
-def handle_learning_rate(args):
+def handle_defaults(args):
+    # set learning rates
     if args.individual_learning_rate is not None:
         args.learning_rate = (args.learning_rate, args.individual_learning_rate)
     else:
         args.learning_rate = (args.learning_rate, args.learning_rate)
+    # set teacher forcing alpha
+    if args.tf_alpha_end is None:
+        args.tf_alpha_end = args.tf_alpha_start
     return args
 
 def main():
     args = parse_args()
     args = get_device(args)
-    args = handle_learning_rate(args)
+    args = handle_defaults(args)
 
     dataset = get_dataset(args)
 
