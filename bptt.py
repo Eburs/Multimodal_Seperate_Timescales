@@ -32,12 +32,11 @@ def load_from_path(model, args, checkpoint=None):
     # remove '_orig_mod.' from keys, which are added by the torch compile function
     # this way the model can be loaded without the need to use compile again if it was trained with it
     statedict = {k.replace('_orig_mod.', ''): v for k, v in statedict.items()}
-    model.load_state_dict(statedict)
-    # if finetuning, reinit the individual params
-    if hasattr(args, 'finetune') and args.finetune:
-        model.saver.save_args(args) # save the args of the fine tuned model
-        model.hierarchisation_scheme.num_subjects = args.num_subjects # update the number of subjects
-        model.hierarchisation_scheme.re_init()
+    # when finetuning remove p_vector and noise_cov from the state dict
+    if args.finetune:
+        statedict.pop('p_vector')
+        statedict.pop('noise_cov')
+    model.load_state_dict(statedict, strict=False)
 
 def read_hypers(args):
     """Reads the hyperparams of the model at args.model_path from the hypers.txt"""
