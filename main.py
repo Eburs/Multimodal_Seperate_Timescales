@@ -54,7 +54,7 @@ def parse_args():
     
     parser.add_argument('--metrics', nargs='*', default=['kl', 'pse'], help='Metrics to evaluate the model on. State space divergence (kl), power spectrum error (pse).')
     parser.add_argument('--kl_bins', type=int, default=30, help='Number of bins per dimension for the state space divergence metric. If 0 uses gmm variant.')
-    parser.add_argument('--pse_smooth', type=int, default=1, help='Smoothing sigma for the power spectrum error metric.')
+    parser.add_argument('--pse_smooth', type=int, default=15, help='Smoothing sigma for the power spectrum error metric.')
     parser.add_argument('--plots', nargs='*', default=['pow', 'hier'], help='Plots to generate. 3D, hovmoller, pow, hier. Defaults to pow and hier.')
 
     parser.add_argument('--lam', type=float, default=0.0, help='lambda for the hierarchical loss. defaults to 0.0')
