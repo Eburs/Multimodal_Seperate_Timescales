@@ -52,7 +52,7 @@ class MultiSubjectDataset(Dataset):
     def __init__(self, path, seq_len, size, subjects_per_batch, num_workers, device="cpu"):
         """Initializes the dataset.
         Args:
-            path: full path to the data. Expected to be .npy file
+            path: full path to the data. Expected to be .pt file
                 containing a timeseries for each subject 
                 (-> shape: num_subjects x num_timesteps x num_features).
             seq_len: length of the sequences during training
@@ -63,7 +63,7 @@ class MultiSubjectDataset(Dataset):
             device: device to store the data on
         """
         self.num_workers = num_workers
-        self.data = torch.from_numpy(np.load(path)).float()
+        self.data = torch.load(path)
         # add subject dimension for single subject datasets
         if self.data.ndim == 2:
             self.data = self.data.unsqueeze(0)

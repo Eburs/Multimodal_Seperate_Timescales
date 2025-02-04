@@ -10,7 +10,7 @@ torch.set_float32_matmul_precision('high')
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a hierarchical PLRNN model.")
-    parser.add_argument('--data_path', type=str, default='./data/lorenz63/3params64sub/noisy.npy', help='path to the data')
+    parser.add_argument('--data_path', type=str, default='./data/lorenz63/3params64sub/noisy.pt', help='path to the data')
     parser.add_argument('--eval_data_path', type=str, default=None, help='path to the evaluation data if available')
     
     parser.add_argument('--obs_size', type=int, default=3, help='size of the observation space')

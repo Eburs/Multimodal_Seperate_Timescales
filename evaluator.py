@@ -29,9 +29,9 @@ class Evaluator(object):
         to fill as much of the attractor space as possible to be a sensible measure."""
         if self.args.eval_data_path is None:
             return None
-        np_data = np.load(self.args.eval_data_path)
-        if np_data.ndim == 2: np_data = np_data[None]
-        return torch.from_numpy(np_data).float().to(device)
+        data = torch.load(self.args.eval_data_path, map_location=device)
+        if data.ndim == 2: data = data[None]
+        return data
     
     def compute_cheap(self, which, gen=None):
         """Computes only the cheap stuff."""
