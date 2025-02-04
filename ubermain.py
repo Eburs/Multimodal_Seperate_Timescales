@@ -17,8 +17,8 @@ def ubermain(n_runs):
     args.append(Argument('batch_size', [1024]))
     args.append(Argument('batches_per_epoch', [50]))
 
-    args.append(Argument('data_path', ['./data/lorenz63/3params64sub/noisy.npy']))
-    args.append(Argument('eval_data_path', ['./data/lorenz63/3params64sub/full.npy']))
+    args.append(Argument('data_path', ['./data/lorenz63/3params64sub/noisy.pt']))
+    args.append(Argument('eval_data_path', ['./data/lorenz63/3params64sub/full.pt']))
     args.append(Argument('train_set_size', [1000]))
 
     args.append(Argument('experiment', ['lorenz63']))
@@ -44,7 +44,7 @@ def ubermain(n_runs):
     args.append(Argument('weight_decay', [0]))
 
     # args.append(Argument('compile', ['']))
-    # args.append(Argument('use_gpu', ['']))
+    args.append(Argument('use_gpu', ['']))
 
     args.append(Argument('metrics', ['kl pse']))
     args.append(Argument('plots', ['pow hier 3D']))
