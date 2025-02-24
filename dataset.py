@@ -85,8 +85,8 @@ class MultiSubjectDataset(Dataset):
     def shuffle_subjects(self):
         """Shuffles the subjects from which the data is sampled."""
         sample_from = np.random.choice(self.num_subjects, self.subjects_per_batch, replace=False)
-        self.env_indices = np.concat([i * np.ones(len(self.datasets[i])) for i in sample_from])
-        self.sample_indices = np.concat([np.arange(len(self.datasets[i])) for i in sample_from])
+        self.env_indices = np.concat([i * np.ones(len(self.datasets[i])) for i in sample_from]).astype(int)
+        self.sample_indices = np.concat([np.arange(len(self.datasets[i])) for i in sample_from]).astype(int)
     
     def get_data(self):
         """Returns the raw data. Both train and test portions."""
