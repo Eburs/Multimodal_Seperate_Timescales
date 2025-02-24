@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, RandomSampler
 import numpy as np
 import time
 
@@ -68,8 +68,11 @@ class MultiSubjectDataset(Dataset):
         if self.data.ndim == 2:
             self.data = self.data.unsqueeze(0)
         self.datasets = []
+        self.sizes = []
         for i in range(self.data.shape[0]):
             self.datasets.append(SingleSubjectDataset(self.data[i], seq_len, size, device=device))
+            self.sizes.append(len(self.datasets[-1]))
+        self.sizes = np.array(self.sizes)
         self.num_subjects = len(self.datasets)
         self.subjects_per_batch = subjects_per_batch
         if self.subjects_per_batch is None or self.subjects_per_batch > self.num_subjects:
@@ -77,13 +80,14 @@ class MultiSubjectDataset(Dataset):
         self.sample_from = np.random.choice(self.num_subjects, self.subjects_per_batch, replace=False)
 
     def __len__(self):
-        return sum([len(ds) for ds in self.datasets[:self.subjects_per_batch]])
+        return sum(self.sizes[self.sample_from])
     
     def __getitem__(self, idx):
-        # convert idx to dataset/subject index and sample index
-        sample_idx = idx // len(self.datasets)
-        subject_idx = np.random.choice(self.sample_from)
-        return self.datasets[subject_idx][sample_idx] + (subject_idx,)
+        cumsum = np.cumsum(self.sizes[self.sample_from], axis=0)
+        env_idx = np.searchsorted(cumsum, idx, side="right")
+        env = self.sample_from[env_idx]
+        sample_idx = idx - cumsum[env_idx - 1] if env_idx > 0 else idx
+        return self.datasets[env][sample_idx] + (env,)
     
     def shuffle_subjects(self):
         """Shuffles the subjects from which the data is sampled."""
@@ -97,18 +101,24 @@ class MultiSubjectDataset(Dataset):
         """Returns the test sets of the sub data sets."""
         return torch.stack([ds.get_test_data() for ds in self.datasets], dim=0)
     
+    def determine_num_workers(self, batch_size, bpe):
+        sampler = RandomSampler(self, num_samples=bpe*batch_size, replacement=bpe*batch_size > len(self))
+        times = []
+        nums = range(13)
+        for nw in nums:
+            start = time.time()
+            for _ in DataLoader(self, batch_size, sampler=sampler, num_workers=nw):
+                pass
+            times.append(time.time() - start)
+        self.num_workers = nums[np.argmin(times)]
+
     def get_dataloader(self, batch_size, bpe):
         """Returns a dataloader with the specified number of workers. If None is passed
         the optimal number of workers is determined, which can be time consuming for 
         larger datasets."""
-        sampler = torch.utils.data.RandomSampler(self, num_samples=bpe*batch_size, replacement=False)
-        times = []
-        nums = range(13)
+        self.shuffle_subjects()
         if self.num_workers is None:
-            for nw in nums:
-                start = time.time()
-                for _ in DataLoader(self, batch_size, sampler=sampler, num_workers=nw):
-                    pass
-                times.append(time.time() - start)
-            self.num_workers = nums[np.argmin(times)]
+            self.determine_num_workers(batch_size, bpe)
+
+        sampler = RandomSampler(self, num_samples=bpe*batch_size, replacement=bpe*batch_size > len(self))
         return DataLoader(self, batch_size, sampler=sampler, num_workers=self.num_workers)

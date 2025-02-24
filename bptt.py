@@ -94,10 +94,9 @@ class BPTT:
             self.model = torch.compile(self.model)
         # initialize dataset
         self.dataset = dataset
-        bpe = args.batches_per_epoch
-        if bpe is None:
-            bpe = len(dataset)//args.batch_size
-        self.dataloader = dataset.get_dataloader(batch_size=args.batch_size, bpe=bpe)
+        self.bpe = args.batches_per_epoch
+        if self.bpe is None:
+            self.bpe = len(dataset)//args.batch_size
         # initialize optimizers
         shared, individual = self.model.hierarchisation_scheme.grouped_parameters()
         self.shared_optimizer = Adam(shared, lr=args.learning_rate[0], weight_decay=args.weight_decay)
@@ -120,7 +119,8 @@ class BPTT:
         for e in pbar:
             self.model.hierarchisation_scheme.step = e+1
             epoch_losses = {'rnn': 0, 'hier': 0}
-            for data, target, subject in self.dataloader:
+            dloader = self.dataset.get_dataloader(batch_size=self.args.batch_size, bpe=self.bpe)
+            for data, target, subject in dloader:
                 # move data to device
                 data = data.to(self.args.device)
                 target = target.to(self.args.device)
@@ -148,7 +148,7 @@ class BPTT:
                 epoch_losses['hier'] += hier_loss.item()
             # update progress bar
             for k, _ in epoch_losses.items():
-                epoch_losses[k] /= len(self.dataloader)
+                epoch_losses[k] /= len(dloader)
             pbar.set_postfix({'loss': sum(epoch_losses.values())})
             # update lr
             self.shared_scheduler.step()
