@@ -68,30 +68,25 @@ class MultiSubjectDataset(Dataset):
         if self.data.ndim == 2:
             self.data = self.data.unsqueeze(0)
         self.datasets = []
-        self.sizes = []
         for i in range(self.data.shape[0]):
             self.datasets.append(SingleSubjectDataset(self.data[i], seq_len, size, device=device))
-            self.sizes.append(len(self.datasets[-1]))
-        self.sizes = np.array(self.sizes)
         self.num_subjects = len(self.datasets)
         self.subjects_per_batch = subjects_per_batch
         if self.subjects_per_batch is None or self.subjects_per_batch > self.num_subjects:
             self.subjects_per_batch = self.num_subjects
-        self.sample_from = np.random.choice(self.num_subjects, self.subjects_per_batch, replace=False)
+        self.shuffle_subjects()
 
     def __len__(self):
-        return sum(self.sizes[self.sample_from])
+        return len(self.env_indices)
     
     def __getitem__(self, idx):
-        cumsum = np.cumsum(self.sizes[self.sample_from], axis=0)
-        env_idx = np.searchsorted(cumsum, idx, side="right")
-        env = self.sample_from[env_idx]
-        sample_idx = idx - cumsum[env_idx - 1] if env_idx > 0 else idx
-        return self.datasets[env][sample_idx] + (env,)
+        return self.datasets[self.env_indices[idx]][self.sample_indices[idx]] + (self.env_indices[idx], )
     
     def shuffle_subjects(self):
         """Shuffles the subjects from which the data is sampled."""
-        self.sample_from = np.random.choice(self.num_subjects, self.subjects_per_batch, replace=False)
+        sample_from = np.random.choice(self.num_subjects, self.subjects_per_batch, replace=False)
+        self.env_indices = np.concat([i * np.ones(len(self.datasets[i])) for i in sample_from])
+        self.sample_indices = np.concat([np.arange(len(self.datasets[i])) for i in sample_from])
     
     def get_data(self):
         """Returns the raw data. Both train and test portions."""

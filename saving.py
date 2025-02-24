@@ -1,6 +1,7 @@
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from matplotlib import pyplot as plt
+import numpy as np
 import os
 
 
@@ -114,12 +115,16 @@ class Saver:
         pses = self.model.evaluator.get_pse()
         for i, pse in enumerate(pses):
             self.writer.add_scalar(f"PSE/{i}", pse, epoch)
+        self.writer.add_scalar('mean_metrics/PSE', np.mean(pses), epoch)
+        self.writer.add_scalar('median_metrics/PSE', np.median(pses), epoch)
     
     @torch.compiler.disable()
     def save_dstsp(self, epoch):
         Ds = self.model.evaluator.get_state_space_divergence()
         for i, d in enumerate(Ds):
             self.writer.add_scalar(f"D_stsp/{i}", d, epoch)
+        self.writer.add_scalar('mean_metrics/D_stsp', torch.mean(Ds), epoch)
+        self.writer.add_scalar('median_metrics/D_stsp', torch.median(Ds), epoch)
     
     @torch.compiler.disable()
     def save_hierarchisation_plots(self, epoch):
