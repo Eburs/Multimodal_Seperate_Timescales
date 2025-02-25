@@ -69,7 +69,7 @@ def edit_args(args, new_args):
     Args:
         args: The original args
         new_args: The new args"""
-    for name in ['eval_data_path', 'experiment', 'name', 'run', 'device']:
+    for name in ['data_path', 'eval_data_path', 'experiment', 'name', 'run', 'device']:
         if getattr(args, name) is not None:
             setattr(new_args, name, getattr(args, name))
     return new_args
@@ -172,7 +172,8 @@ class BPTT:
         for e in pbar:
             self.model.hierarchisation_scheme.step = e+1
             epoch_losses = {'rnn': 0, 'hier': 0}
-            for data, target, subject in self.dataloader:
+            dloader = self.dataset.get_dataloader(batch_size=self.args.batch_size, bpe=self.bpe)
+            for data, target, subject in dloader:
                 # if using subjects_per_batch, reshuffle the pool for next batch
                 if self.args.subjects_per_batch is not None:
                     self.dataset.shuffle_subjects()
@@ -201,7 +202,7 @@ class BPTT:
                 epoch_losses['hier'] += hier_loss.item()
             # update progress bar
             for k, _ in epoch_losses.items():
-                epoch_losses[k] /= len(self.dataloader)
+                epoch_losses[k] /= len(dloader)
             pbar.set_postfix({'loss': sum(epoch_losses.values())})
             # update lr
             self.individual_scheduler.step()
