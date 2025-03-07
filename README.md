@@ -2,15 +2,10 @@
 
 ## Requirements
 
-We include the `environment.yml` file to clone our conda environment. Simply run
+We include the `requirements.txt` file to clone our python environment. Simply run
 ```
-conda env create -f environment.yml
+pip install -r requirements.txt
 ```
-to install and
-```
-conda activate hier-shPLRNN
-```
-to activate the environment.
 
 ## Usage
 
@@ -41,7 +36,7 @@ If you find the repository and/or paper helpful for your own research, please ci
     brenner2025learning,
     title={Learning Interpretable Hierarchical Dynamical Systems Models from Time Series Data},
     author={Manuel Brenner and Elias Weber and Georgia Koppe and Daniel Durstewitz},
-    booktitle={The Thirteenth International Conference on Learning Representations},
+    booktitle={The Thirteenth International Conference on Learning Representations (ICLR)},
     year={2025},
     url={https://openreview.net/forum?id=Vp2OAxMs2s}
 }
