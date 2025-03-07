@@ -51,7 +51,11 @@ def ubermain(n_runs):
 
     args.append(Argument('lam', [0]))
 
-    args.append(Argument('clip_grad_norm', [10]))
+    # args.append(Argument('clip_grad_norm', [10]))
+
+    args.append(Argument('learn_noise_cov', ['']))
+
+    args.append(Argument('num_workers', [0]))
 
     return args
 
