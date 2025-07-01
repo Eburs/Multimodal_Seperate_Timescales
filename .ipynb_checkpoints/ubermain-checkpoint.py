@@ -15,40 +15,26 @@ def ubermain(n_runs):
 
     args.append(Argument("num_epochs", [5000]))
     args.append(Argument("batch_size", [1024]))
-    args.append(Argument("batches_per_epoch", [70]))
+    args.append(Argument("batches_per_epoch", [50]))
 
-    args.append(
-        Argument(
-            "data_path",
-            [
-                "./data/correlated_system/lorenz_roessler_1vec_correlated_train_reshaped.pt"
-            ],
-        )
-    )
-    args.append(
-        Argument(
-            "eval_data_path",
-            [
-                "./data/correlated_system/lorenz_roessler_1vec_correlated_test_reshaped.pt"
-            ],
-        )
-    )
+    args.append(Argument("data_path", ["./data/lorenz63/3params64sub/noisy.pt"]))
+    args.append(Argument("eval_data_path", ["./data/lorenz63/3params64sub/full.pt"]))
     args.append(Argument("train_set_size", [1000]))
 
-    args.append(Argument("experiment", ["lorenzroessler"]))
+    args.append(Argument("experiment", ["lorenz63"]))
     args.append(Argument("run", list(range(1, 1 + n_runs))))
 
     args.append(Argument("hierarchisation_scheme", ["projection"], add_to_name_as=""))
     args.append(Argument("num_individual_params", [6], add_to_name_as="dp"))
 
     args.append(Argument("obs_model", ["identity"]))
-    args.append(Argument("obs_size", [6]))
-    args.append(Argument("latent_size", [50]))
-    args.append(Argument("forcing_size", [6]))
-    args.append(Argument("hidden_size", [60], add_to_name_as="dh"))
+    args.append(Argument("obs_size", [3]))
+    args.append(Argument("latent_size", [10]))
+    args.append(Argument("forcing_size", [3]))
+    args.append(Argument("hidden_size", [50], add_to_name_as="dh"))
 
-    args.append(Argument("learning_rate", [1e-4]))
-    args.append(Argument("individual_learning_rate", [1e-3]))
+    args.append(Argument("learning_rate", [1e-3]))
+    args.append(Argument("individual_learning_rate", [1e-2]))
 
     args.append(Argument("tf_alpha_start", [0.2]))
     args.append(Argument("tf_alpha_end", [0.02]))
@@ -57,10 +43,10 @@ def ubermain(n_runs):
 
     args.append(Argument("weight_decay", [0]))
 
-    # args.append(Argument("compile", [""]))
-    args.append(Argument("use_gpu", [""]))
+    # args.append(Argument('compile', ['']))
+    # args.append(Argument('use_gpu', ['']))
 
-    # args.append(Argument("metrics", ["kl pse"]))
+    args.append(Argument("metrics", ["kl pse"]))
     args.append(Argument("plots", ["pow hier 3D"]))
 
     args.append(Argument("lam", [0]))
@@ -69,11 +55,7 @@ def ubermain(n_runs):
 
     args.append(Argument("learn_noise_cov", [""]))
 
-    args.append(Argument("num_workers", [4]))
-
-    args.append(Argument("num_shared_objects", [2]))
-
-    args.append(Argument("eval_device", ["cpu"]))
+    args.append(Argument("num_workers", [0]))
 
     return args
 
@@ -91,3 +73,4 @@ if __name__ == "__main__":
 
     args = ubermain(n_runs)
     run_settings(*create_tasks_from_arguments(args, n_proc_per_gpu, n_cpu))
+

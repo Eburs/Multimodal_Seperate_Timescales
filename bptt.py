@@ -1,11 +1,15 @@
+from enum import unique
+from typing import Tuple
+from numpy import dtype
 import torch
-from torch import nn
+from torch import device, nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import trange
 import os
 from argparse import Namespace
 from model import shallowPLRNN, nll_loss
+import sys
 
 
 def load_from_path(model, args, checkpoint=None):
@@ -20,32 +24,35 @@ def load_from_path(model, args, checkpoint=None):
         # find most recent model
         cps = []
         for f in os.listdir(path):
-            if f.split('.')[-1] == 'pt': cps.append(int(f.split('.')[0].split('_')[-1]))
-        assert len(cps) > 0, 'No model files found in specified folder.'
-        path = os.path.join(path, f'model_{max(cps)}.pt')
+            if f.split(".")[-1] == "pt":
+                cps.append(int(f.split(".")[0].split("_")[-1]))
+        assert len(cps) > 0, "No model files found in specified folder."
+        path = os.path.join(path, f"model_{max(cps)}.pt")
     else:
-        path = os.path.join(path, f'model_{checkpoint}.pt')
+        path = os.path.join(path, f"model_{checkpoint}.pt")
     # load
-    print(f'Loading model from {path}')
+    print(f"Loading model from {path}")
     # load state dict (on specified device)
-    statedict = torch.load(path, map_location=model.device)
+    statedict = torch.load(path, model.device)
     # remove '_orig_mod.' from keys, which are added by the torch compile function
     # this way the model can be loaded without the need to use compile again if it was trained with it
-    statedict = {k.replace('_orig_mod.', ''): v for k, v in statedict.items()}
+    statedict = {k.replace("_orig_mod.", ""): v for k, v in statedict.items()}
     # when finetuning remove p_vector and noise_cov from the state dict
+    print(args)
     if args.finetune:
-        statedict.pop('p_vector')
-        statedict.pop('noise_cov')
+        statedict.pop("p_vector")
+        statedict.pop("noise_cov")
     model.load_state_dict(statedict, strict=False)
+
 
 def read_hypers(args):
     """Reads the hyperparams of the model at args.model_path from the hypers.txt"""
     new_args = Namespace()
-    with open(os.path.join(args.model_path, 'hypers.txt')) as file:
+    with open(os.path.join(args.model_path, "hypers.txt")) as file:
         for line in file.readlines():
-            line_ = line.split(': ')
+            line_ = line.split(": ")
             name, val = line_[0], line_[1]
-            val = val.strip('\n')
+            val = val.strip("\n")
             # find the correct type
             try:
                 val = float(val)
@@ -56,7 +63,7 @@ def read_hypers(args):
                     val = eval(val)
                 except:
                     try:
-                        parts = val.strip('()').split(',')
+                        parts = val.strip("()").split(",")
                         if len(parts) > 1:
                             val = tuple()
                     except:
@@ -64,25 +71,28 @@ def read_hypers(args):
             setattr(new_args, name, val)
     return new_args
 
+
 def edit_args(args, new_args):
     """Edits the args with the new_args.
     Args:
         args: The original args
         new_args: The new args"""
-    for name in ['data_path', 'eval_data_path', 'experiment', 'name', 'run', 'device']:
+    for name in ["data_path", "eval_data_path", "experiment", "name", "run", "device"]:
         if getattr(args, name) is not None:
             setattr(new_args, name, getattr(args, name))
     return new_args
 
+
 class BPTT:
     """Training class for backpropagation through time."""
+
     def __init__(self, args, dataset):
         """Args:
-            model: model to train
-            dataset: dataset to train on"""
+        model: model to train
+        dataset: dataset to train on"""
         self.args = args
         # initialize model
-        if args.model_path is not None: # load state dict from file if specified
+        if args.model_path is not None:  # load state dict from file if specified
             modelargs = read_hypers(args)
             modelargs = edit_args(args, modelargs)
             self.model = shallowPLRNN(modelargs, dataset)
@@ -96,19 +106,82 @@ class BPTT:
         self.dataset = dataset
         self.bpe = args.batches_per_epoch
         if self.bpe is None:
-            self.bpe = len(dataset)//args.batch_size
+            self.bpe = len(dataset) // args.batch_size
         # initialize optimizers
         shared, individual = self.model.hierarchisation_scheme.grouped_parameters()
-        self.shared_optimizer = Adam(shared, lr=args.learning_rate[0], weight_decay=args.weight_decay)
+        self.shared_optimizer = Adam(
+            shared, lr=args.learning_rate[0], weight_decay=args.weight_decay
+        )
         self.individual_optimizer = Adam(individual, lr=args.learning_rate[1])
         # exponential LR schedule leads to compilation issues due to float multiplication (?)
         # therefore, we use a lambda function to decay the LR and do the multiplication with a tensor
-        self.shared_scheduler = LambdaLR(self.shared_optimizer, lambda epoch: torch.tensor(0.999)**epoch)
-        self.individual_scheduler = LambdaLR(self.individual_optimizer, lambda epoch: torch.tensor(0.999)**epoch)
+        self.shared_scheduler = LambdaLR(
+            self.shared_optimizer, lambda epoch: torch.tensor(0.999) ** epoch
+        )
+        self.individual_scheduler = LambdaLR(
+            self.individual_optimizer, lambda epoch: torch.tensor(0.999) ** epoch
+        )
         # initialize criterion
         self.criterion = nll_loss
         # move model to device
         self.model.to(args.device)
+
+    def merge_data(self, data, target, subject):
+        # Merge subjects that are shared
+        unique_subjects, num_subjects = subject.unique(return_counts=True)
+        # ensure that all possible subjects are accounted for
+        num_all_subjects = torch.zeros(self.dataset.num_subjects, dtype=torch.long)
+        num_all_subjects[unique_subjects] = num_subjects
+
+        shared_data = torch.zeros(
+            data.shape[0] // self.args.num_shared_objects,
+            data.shape[1],
+            data.shape[2] * self.args.num_shared_objects,
+        )
+        shared_target = torch.zeros(
+            data.shape[0] // self.args.num_shared_objects,
+            data.shape[1],
+            data.shape[2] * self.args.num_shared_objects,
+        )
+        shared_subject = torch.zeros(
+            subject.shape[0] // self.args.num_shared_objects, dtype=torch.int
+        )
+        merge_index = 0
+        for i in range(self.dataset.num_subjects // self.args.num_shared_objects):
+            number_of_matching_pairs = num_all_subjects[
+                i * self.args.num_shared_objects : (i + 1)
+                * self.args.num_shared_objects
+            ].min()
+
+            new_data = torch.cat(
+                [
+                    data[torch.where(subject == j)][:number_of_matching_pairs]
+                    for j in range(
+                        i * self.args.num_shared_objects,
+                        (i + 1) * self.args.num_shared_objects,
+                    )
+                ],
+                dim=-1,
+            )
+            new_target = torch.cat(
+                [
+                    target[torch.where(subject == j)][:number_of_matching_pairs]
+                    for j in range(
+                        i * self.args.num_shared_objects,
+                        (i + 1) * self.args.num_shared_objects,
+                    )
+                ],
+                dim=-1,
+            )
+            shared_data[merge_index : merge_index + new_data.shape[0]] = new_data
+            shared_target[merge_index : merge_index + new_data.shape[0]] = new_target
+            shared_subject[merge_index : merge_index + new_data.shape[0]] = i
+            merge_index += new_data.shape[0]
+        return (
+            shared_data[:merge_index],
+            shared_target[:merge_index],
+            shared_subject[:merge_index],
+        )
 
     def train(self):
         """Trains the model."""
@@ -117,52 +190,62 @@ class BPTT:
         # initialize progress bar
         pbar = trange(self.args.num_epochs)
         for e in pbar:
-            self.model.hierarchisation_scheme.step = e+1
-            epoch_losses = {'rnn': 0, 'hier': 0}
-            dloader = self.dataset.get_dataloader(batch_size=self.args.batch_size, bpe=self.bpe)
+            self.model.hierarchisation_scheme.step = e + 1
+            epoch_losses = {"rnn": 0, "hier": 0}
+            dloader = self.dataset.get_dataloader(
+                batch_size=self.args.batch_size, bpe=self.bpe
+            )
+
             for data, target, subject in dloader:
+                data, target, subject = self.merge_data(data, target, subject)
                 # move data to device
                 data = data.to(self.args.device)
                 target = target.to(self.args.device)
                 subject = subject.to(self.args.device)
+
                 # forward pass
                 prediction = self.model(data, subject)
                 # reset gradients
                 self.shared_optimizer.zero_grad()
                 self.individual_optimizer.zero_grad()
                 # calculate losses
-                rnn_loss = self.criterion(prediction, target, self.model.noise_cov[subject])
+                rnn_loss = self.criterion(
+                    prediction, target, self.model.noise_cov[subject]
+                )
                 hier_loss = torch.tensor(0)
                 if self.args.lam > 0:
-                    hier_loss = self.args.lam*self.model.hierarchisation_scheme.loss()
+                    hier_loss = self.args.lam * self.model.hierarchisation_scheme.loss()
                 # backpropagate
                 (rnn_loss + hier_loss).backward()
                 # clip gradients
                 if self.args.clip_grad_norm > 0:
-                    nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self.args.clip_grad_norm
+                    )
                 # update parameters
                 self.shared_optimizer.step()
                 self.individual_optimizer.step()
                 # add loss to epoch loss
-                epoch_losses['rnn'] += rnn_loss.item()
-                epoch_losses['hier'] += hier_loss.item()
+                epoch_losses["rnn"] += rnn_loss.item()
+                epoch_losses["hier"] += hier_loss.item()
             # update progress bar
             for k, _ in epoch_losses.items():
                 epoch_losses[k] /= len(dloader)
-            pbar.set_postfix({'loss': sum(epoch_losses.values())})
+            pbar.set_postfix({"loss": sum(epoch_losses.values())})
             # update lr
             self.shared_scheduler.step()
             self.individual_scheduler.step()
             # update tf parameter
             self.model.tf_alpha *= self.model.tf_gamma
-            self.model.saver.writer.add_scalar('tf_alpha', self.model.tf_alpha, e+1)
+            self.model.saver.writer.add_scalar("tf_alpha", self.model.tf_alpha, e + 1)
             # save model, stats and plots
-            self.model.saver.save_loss(e+1, epoch_losses)
-            if (e+1)%500 == 0:
-                self.model.saver.save_expensive(e+1)
-            elif (e+1)%100 == 0:
-                self.model.saver.save_cheap(e+1)
-    
+            #
+            self.model.saver.save_loss(e + 1, epoch_losses)
+            # if (e + 1) % 50 == 0:
+            #   self.model.saver.save_expensive(e + 1)
+            if (e + 1) % 500 == 0:
+                self.model.saver.save_cheap(e + 1)
+
     def finetune(self):
         """Finetunes a model. Copied train method but with only the individual optimizer."""
         # initiate train mode
@@ -170,9 +253,11 @@ class BPTT:
         # initialize progress bar
         pbar = trange(self.args.num_epochs)
         for e in pbar:
-            self.model.hierarchisation_scheme.step = e+1
-            epoch_losses = {'rnn': 0, 'hier': 0}
-            dloader = self.dataset.get_dataloader(batch_size=self.args.batch_size, bpe=self.bpe)
+            self.model.hierarchisation_scheme.step = e + 1
+            epoch_losses = {"rnn": 0, "hier": 0}
+            dloader = self.dataset.get_dataloader(
+                batch_size=self.args.batch_size, bpe=self.bpe
+            )
             for data, target, subject in dloader:
                 # if using subjects_per_batch, reshuffle the pool for next batch
                 if self.args.subjects_per_batch is not None:
@@ -186,32 +271,36 @@ class BPTT:
                 # reset gradients
                 self.individual_optimizer.zero_grad()
                 # calculate losses
-                rnn_loss = self.criterion(prediction, target, self.model.noise_cov[subject])
+                rnn_loss = self.criterion(
+                    prediction, target, self.model.noise_cov[subject]
+                )
                 hier_loss = torch.tensor(0)
                 if self.args.lam > 0:
-                    hier_loss = self.args.lam*self.model.hierarchisation_scheme.loss()
+                    hier_loss = self.args.lam * self.model.hierarchisation_scheme.loss()
                 # backpropagate
                 (rnn_loss + hier_loss).backward()
                 # clip gradients
                 if self.args.clip_grad_norm > 0:
-                    nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self.args.clip_grad_norm
+                    )
                 # update parameters
                 self.individual_optimizer.step()
                 # add loss to epoch loss
-                epoch_losses['rnn'] += rnn_loss.item()
-                epoch_losses['hier'] += hier_loss.item()
+                epoch_losses["rnn"] += rnn_loss.item()
+                epoch_losses["hier"] += hier_loss.item()
             # update progress bar
             for k, _ in epoch_losses.items():
                 epoch_losses[k] /= len(dloader)
-            pbar.set_postfix({'loss': sum(epoch_losses.values())})
+            pbar.set_postfix({"loss": sum(epoch_losses.values())})
             # update lr
             self.individual_scheduler.step()
             # update tf parameter
             self.model.tf_alpha *= self.model.tf_gamma
-            self.model.saver.writer.add_scalar('tf_alpha', self.model.tf_alpha, e+1)
+            self.model.saver.writer.add_scalar("tf_alpha", self.model.tf_alpha, e + 1)
             # save model, stats and plots
-            self.model.saver.save_loss(e+1, epoch_losses)
-            if (e+1)%500 == 0:
-                self.model.saver.save_expensive(e+1)
-            elif (e+1)%100 == 0:
-                self.model.saver.save_cheap(e+1)
+            self.model.saver.save_loss(e + 1, epoch_losses)
+            if (e + 1) % 500 == 0:
+                self.model.saver.save_expensive(e + 1)
+            elif (e + 1) % 100 == 0:
+                self.model.saver.save_cheap(e + 1)

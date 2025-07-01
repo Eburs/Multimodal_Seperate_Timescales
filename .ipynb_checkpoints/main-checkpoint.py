@@ -17,7 +17,6 @@ def parse_args():
         default="./data/lorenz63/3params64sub/noisy.pt",
         help="path to the data",
     )
-
     parser.add_argument(
         "--eval_data_path",
         type=str,
@@ -215,13 +214,6 @@ def parse_args():
         help="Whether to learn the diagonal noise covariance matrix.",
     )
 
-    parser.add_argument(
-        "--num_shared_objects",
-        type=int,
-        default=1,
-        help="Number of different systems that share a feature vector",
-    )
-
     return parser.parse_args()
 
 
@@ -266,17 +258,19 @@ def handle_defaults(args):
 
 def main():
     args = parse_args()
+    print(args)
     args = get_device(args)
     args = handle_defaults(args)
 
     dataset = get_dataset(args)
+    print(len(dataset))
 
-    training_algorithm = BPTT(args, dataset)
-    fun = training_algorithm.train if not args.finetune else training_algorithm.finetune
-    if args.compile:
-        torch.compile(fun)()
-    else:
-        fun()
+    #    training_algorithm = BPTT(args, dataset)
+    # fun = training_algorithm.train if not args.finetune else training_algorithm.finetune
+    # if args.compile:
+    #    torch.compile(fun)()
+    # else:
+    #    fun()
 
 
 if __name__ == "__main__":

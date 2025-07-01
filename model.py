@@ -8,7 +8,7 @@ from saving import Saver
 
 
 def nll_loss(input, target, log_cov):
-    md = 0.5 * torch.sum((input - target)**2 / torch.exp(log_cov), dim=-1)
+    md = 0.5 * torch.sum((input - target) ** 2 / torch.exp(log_cov), dim=-1)
     logdet = 0.5 * log_cov.sum(dim=-1)
     return torch.mean(logdet + md)
 
@@ -26,26 +26,33 @@ class shallowPLRNN(nn.Module):
         self.dx = args.obs_size
         self.dz = args.latent_size if args.latent_size is not None else self.dx
         self.df = args.forcing_size if args.forcing_size is not None else self.dz
-        if args.obs_model == 'identity':
+        if args.obs_model == "identity":
             # if identity observation model, can only force dx dimensions
             self.df = self.dx
         self.num_subjects = dataset.num_subjects
         # handle teacher forcing stuff
         self.tf_alpha = args.tf_alpha_start
-        self.tf_gamma = 1 if args.tf_alpha_end == args.tf_alpha_start else np.power(args.tf_alpha_end/args.tf_alpha_start, 1/args.num_epochs)
+        self.tf_gamma = (
+            1
+            if args.tf_alpha_end == args.tf_alpha_start
+            else np.power(args.tf_alpha_end / args.tf_alpha_start, 1 / args.num_epochs)
+        )
         # save plotter evaluator and saver
-        self.plotter = Plotter(self, dataset)
+        self.plotter = Plotter(self, dataset, args)
         self.evaluator = Evaluator(self, args, dataset)
         self.saver = Saver(self, args, dataset)
         # initialize hierarchisation scheme, this handles the parameters
-        self.hierarchisation_scheme = get_scheme_by_name(args.hierarchisation_scheme)(self, args)
+        self.hierarchisation_scheme = get_scheme_by_name(args.hierarchisation_scheme)(
+            self, args
+        )
         self.hierarchisation_scheme.init_parameters()
         self.latent_step = self.vanilla_step
+        self.num_shared_objects = args.num_shared_objects
         if args.clipped:
             self.latent_step = self.clipped_step
         self.device = args.device
         self.to(self.device)
-    
+
     def encode(self, x):
         """'Encodes' the observations to the latent space."""
         pinv = torch.pinverse(self.obs_matrix)
@@ -54,7 +61,7 @@ class shallowPLRNN(nn.Module):
     def decode(self, z):
         """'Decodes' latent states back to the observation space."""
         return z @ self.obs_matrix
-    
+
     def teacher_force(self, z_est, z_gt):
         """Generalized teacher forcing. The estimated latent state
         is linearly interpolated with the ground truth latent state.
@@ -66,9 +73,12 @@ class shallowPLRNN(nn.Module):
             z: teacher forced latent state
         """
         ans = z_est
-        ans[..., :self.df] = self.tf_alpha * z_gt[..., :self.df] + (1 - self.tf_alpha) * z_est[..., :self.df]
+        ans[..., : self.df] = (
+            self.tf_alpha * z_gt[..., : self.df]
+            + (1 - self.tf_alpha) * z_est[..., : self.df]
+        )
         return ans
-    
+
     def vanilla_step(self, z, A, W1, W2, h1, h2):
         """Vanilla shPLRNN state update step.
         Args:
@@ -76,8 +86,14 @@ class shallowPLRNN(nn.Module):
             ...: model parameters
         returns:
             z: next latent state"""
-        return A * z + torch.einsum('bij,bj->bi', W1, torch.relu(torch.einsum('bij,bj->bi', W2, z) + h2)) + h1
-    
+        return (
+            A * z
+            + torch.einsum(
+                "bij,bj->bi", W1, torch.relu(torch.einsum("bij,bj->bi", W2, z) + h2)
+            )
+            + h1
+        )
+
     def clipped_step(self, z, A, W1, W2, h1, h2):
         """Clipped shPLRNN state update step.
         Args:
@@ -85,7 +101,16 @@ class shallowPLRNN(nn.Module):
             ...: model parameters
         returns:
             z: next latent state"""
-        return A * z + torch.einsum('bij,bj->bi', W1, torch.relu(torch.einsum('bij,bj->bi', W2, z) + h2) - torch.relu(torch.einsum('bij,bj->bi', W2, z))) + h1
+        return (
+            A * z
+            + torch.einsum(
+                "bij,bj->bi",
+                W1,
+                torch.relu(torch.einsum("bij,bj->bi", W2, z) + h2)
+                - torch.relu(torch.einsum("bij,bj->bi", W2, z)),
+            )
+            + h1
+        )
 
     def forward(self, x_gt, subject):
         """Forward pass of the shallow PLRNN model.
@@ -103,15 +128,15 @@ class shallowPLRNN(nn.Module):
         Z = torch.empty(T, B, self.dz, device=self.device)
         # initialize latent state
         z = torch.zeros(B, self.dz, device=self.device)
-        z[:,:self.df] = forcing_signals[:,0,:self.df]
-        
+        z[:, : self.df] = forcing_signals[:, 0, : self.df]
+
         # iterate over timesteps
         for t in range(T):
-            z = self.teacher_force(z, forcing_signals[:,t])
+            z = self.teacher_force(z, forcing_signals[:, t])
             z = self.latent_step(z, *params)
             Z[t] = z
-        return self.decode(Z.permute(1,0,2))
-    
+        return self.decode(Z.permute(1, 0, 2))
+
     @torch.no_grad()
     def generate_free_trajectory(self, init, T, subject):
         """Generates a free trajectory.
@@ -119,7 +144,7 @@ class shallowPLRNN(nn.Module):
             init: initial condition
             T: length of the trajectory
             subject: subject to generate the trajectory for
-                can be vectorized, then pass initial conditions 
+                can be vectorized, then pass initial conditions
                 for each subject
         Returns:
             trajectory: generated trajectory
@@ -144,5 +169,5 @@ class shallowPLRNN(nn.Module):
         # generate trajectory
         params = self.hierarchisation_scheme.get_parameters(subject)
         for t in range(1, T):
-            trajectory[t] = self.latent_step(trajectory[t-1], *params)
-        return self.decode(trajectory.permute(1,0,2))
+            trajectory[t] = self.latent_step(trajectory[t - 1], *params)
+        return self.decode(trajectory.permute(1, 0, 2))

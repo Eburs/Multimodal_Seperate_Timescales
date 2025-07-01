@@ -7,6 +7,7 @@ from eval.scyfi import metric as scyfi
 
 class Evaluator(object):
     """Class for evaluating a model."""
+
     def __init__(self, model, args, dataset):
         """Initializes the evaluator with a model and data set.
         Args:
@@ -22,7 +23,7 @@ class Evaluator(object):
             self.eval_data = self.test_data
         self.smoothing = args.pse_smooth
         self.compute_gt_power_spectrum()
-    
+
     def load_eval_data(self, device):
         """Loads the larger evaluation data set if specified. This is used
         for computing the state space divergence, since that needs the trajectories
@@ -30,65 +31,98 @@ class Evaluator(object):
         if self.args.eval_data_path is None:
             return None
         data = torch.load(self.args.eval_data_path, map_location=device)
-        if data.ndim == 2: data = data[None]
+        if data.ndim == 2:
+            data = data[None]
         return data
-    
+
     def compute_cheap(self, which, gen=None):
         """Computes only the cheap stuff."""
         S, T, _ = self.test_data.shape
+        nObjects = self.args.num_shared_objects
+        S = S // nObjects
+
         if gen is None:
-            z0 = self.test_data[:,0]
+            z0 = torch.cat(
+                [self.test_data[Ob::nObjects, 0] for Ob in range(nObjects)],
+                dim=-1,
+            )
             self.gen = self.model.generate_free_trajectory(z0, T, torch.arange(S))
-            self.test = self.test_data
+            self.test = self.test_data[:, :T]
             gen = self.gen
-        if 'pse' in which:
+        if "pse" in which:
             self.compute_power_spectrum(gen[:, :T])
             self.compute_pse()
-        elif 'power_spectrum' in which:
+        elif "power_spectrum" in which:
             self.compute_power_spectrum(gen[:, :T])
-        if 'scyfi' in which:
+        if "scyfi" in which:
             self.compute_scyfi()
 
     def compute_expensive(self, which):
         """Computes exepnsive and cheap stuff."""
         # generate long trajectory (saved for plotting)
-        if self.eval_data.ndim == 2: self.eval_data.unsqueeze(0)
+        if self.eval_data.ndim == 2:
+            self.eval_data.unsqueeze(0)
+
         S, T, _ = self.eval_data.shape
-        z0 = self.eval_data[:,0]
+        nObjects = self.args.num_shared_objects
+        S = S // nObjects
+
+        z0 = torch.cat(
+            [self.eval_data[Ob::nObjects, 0] for Ob in range(nObjects)],
+            dim=-1,
+        )
         self.gen = self.model.generate_free_trajectory(z0, T, torch.arange(S))
-        self.test = self.eval_data
+
         # state space divergence
-        if 'dstsp' in which:
-            self.compute_state_space_divergence(self.gen)
+        reshaped_ground_truth = torch.cat(
+            [self.eval_data[Ob::nObjects] for Ob in range(nObjects)],
+            dim=-1,
+        )
+        print(reshaped_ground_truth.shape)
+
+        if "dstsp" in which:
+            self.compute_state_space_divergence(self.gen, reshaped_ground_truth)
         # compute cheap
         self.compute_cheap(which, self.gen)
 
     def compute_gt_power_spectrum(self):
         """Pre computes the ground truth power spectrum. This only needs to be done
         once since it doesn't change."""
-        self.gt_power_spectrum = compute_and_smooth_power_spectrum(self.test_data, self.smoothing)
-    
+        # reshape test data to account for shared objects
+        nObjects = self.args.num_shared_objects
+        gt_data = torch.cat(
+            [self.test_data[Ob::nObjects] for Ob in range(nObjects)],
+            dim=-1,
+        )
+        self.gt_power_spectrum = compute_and_smooth_power_spectrum(
+            gt_data, self.smoothing
+        )
+
     def compute_power_spectrum(self, gen):
         """Generates a trajectory of same length as
         eval data and computes its power specturm."""
         self.gen_power_spectrum = compute_and_smooth_power_spectrum(gen, self.smoothing)
-    
+
     def compute_pse(self):
         """Computes the average hellinger distance across
         latent dimensions of the gt and the gen power spectrum.
         This must be called after the generated power
         spectrum has been computed."""
         self.pse = power_spectrum_error(self.gt_power_spectrum, self.gen_power_spectrum)
-    
-    def compute_state_space_divergence(self, gen):
+
+    def compute_state_space_divergence(self, gen, gt):
         """Computes the state space divergence between the eval data (test data if former
         has not been provided) and a generated trajectory of same length."""
-        dstsp_fn = state_space_divergence_gmm if self.args.kl_bins == 0 else lambda x,y: state_space_divergence_binning(x, y, self.args.kl_bins)
+        dstsp_fn = (
+            state_space_divergence_gmm
+            if self.args.kl_bins == 0
+            else lambda x, y: state_space_divergence_binning(x, y, self.args.kl_bins)
+        )
         d = []
-        for s in range(self.test_data.shape[0]):
-            d.append(dstsp_fn(gen[s], self.eval_data[s]))
+        for s in range(gt.shape[0]):
+            d.append(dstsp_fn(gen[s], gt[s]))
         self.D_state_space = torch.tensor(d)
-    
+
     def compute_scyfi(self):
         if self.args.latent_size > 3:
             return
@@ -101,24 +135,28 @@ class Evaluator(object):
             h1 = h1.detach().squeeze().cpu().numpy()
             h2 = h2.detach().squeeze().cpu().numpy()
             try:
-                fps.append(scyfi(A, W1, W2, h1, h2)[0,:,0])
+                fps.append(scyfi(A, W1, W2, h1, h2)[0, :, 0])
             except IndexError:
                 fps.append(None)
-                print('Something went wrong in the computation of the fixed points. (Probably did not find any).')
+                print(
+                    "Something went wrong in the computation of the fixed points. (Probably did not find any)."
+                )
         self.fps = fps
-    
+
     def get_power_spectrum(self):
         """Returns the previously saved power spectra without
         re-computing them."""
         return self.gen_power_spectrum, self.gt_power_spectrum
-    
+
     def get_interval_of_interest(self):
         """Returns the interval of interest for the power spectrum plot.
         (A large portion of the power spectrum is vanishingly small, this makes
         sure that the plots are easier to evaluate by eye)."""
         # mask frequencies above some threshold
         threshold = 1e-3
-        mask = np.logical_or(self.gt_power_spectrum > threshold, self.gen_power_spectrum > threshold)
+        mask = np.logical_or(
+            self.gt_power_spectrum > threshold, self.gen_power_spectrum > threshold
+        )
         # get indices of first and last non-zero entry
         first = np.argmax(mask, axis=1)
         last = mask.shape[1] - np.argmax(np.flip(mask, axis=1), axis=1)
@@ -127,11 +165,11 @@ class Evaluator(object):
 
     def get_pse(self):
         return self.pse
-    
+
     def get_state_space_divergence(self):
         """Returns the previously computed state space divergence."""
         return self.D_state_space
-    
+
     def get_gen_data(self):
         """Returns the last generated trajectory. Used for plotting
         so that a trajectory is generated only once."""
@@ -141,9 +179,9 @@ class Evaluator(object):
         """Returns the trajectory of which the initial state has been used
         to last generate a trajectory. Either test data or eval data."""
         return self.test
-    
+
     def get_scyfi(self):
         return self.fps
-    
+
     def get_n_step_mse(self, n):
-        return torch.nn.functional.mse_loss(self.gen[...,:n,:], self.test[...,:n,:])
+        return torch.nn.functional.mse_loss(self.gen[..., :n, :], self.test[..., :n, :])
